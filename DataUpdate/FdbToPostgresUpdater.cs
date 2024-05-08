@@ -8,30 +8,36 @@ namespace DataUpdate
     {
         private readonly string _fdbConnectionString;
         private readonly string _postgresConnectionString;
-        private readonly string _fdbTableName;
+        private readonly string _fdbTable1Name;
+        private readonly string _fdbTable2Name;
+        private readonly string _commonColumn;
         private readonly string _postgresTableName;
-        private readonly List<string> _fdbColumnsToRetrieve;
+        private readonly List<string> _fdbColumnsToRetrieve1;
+        private readonly List<string> _fdbColumnsToRetrieve2;
 
 
-        public FdbToPostgresUpdater(string fdbConnectionString, string postgresConnectionString, string fdbName, string postgresTableName, List<string> fdbColumns)
+        public FdbToPostgresUpdater(string fdbConnectionString, string postgresConnectionString, string fdbName1, string fdbName2, string commonColumn, string postgresTableName, List<string> fdbColumns1, List<string> fdbColumns2)
         {
             _fdbConnectionString = fdbConnectionString;
             _postgresConnectionString = postgresConnectionString;
-            _fdbTableName = fdbName;
+            _fdbTable1Name = fdbName1;
+            _fdbTable2Name = fdbName2;
             _postgresTableName = postgresTableName;
-            _fdbColumnsToRetrieve = fdbColumns;
+            _commonColumn = commonColumn;
+            _fdbColumnsToRetrieve1 = fdbColumns1;
+            _fdbColumnsToRetrieve2 = fdbColumns2;
         }
 
         public void UpdateData()
         {
             // Read data from FDB file
-            DataTable fdbData = GetFdbData();
+            DataTable combinedData = GetCombinedFdbData();
 
             // Update data in PostgreSQL
-            UpdatePostgresTable(fdbData);
+            UpdatePostgresTable(combinedData);
         }
 
-        private DataTable GetFdbData()
+        private DataTable GetCombinedFdbData()
         {
             DataTable dataTable = new DataTable();
 
@@ -39,14 +45,19 @@ namespace DataUpdate
             {
                 connection.Open();
 
-                // Build the SELECT query with specified columns
-                string selectQuery = $"SELECT {string.Join(",", _fdbColumnsToRetrieve)} FROM {_fdbTableName}";
-                using (FbCommand command = new FbCommand(selectQuery, connection))
+                // Build a JOIN query using the common column and selecting columns from both tables
+                string joinQuery = $"SELECT " +
+                   $"{string.Join(",", _fdbColumnsToRetrieve1.Select(c => $"t1.{c} AS {c}1"))}, " +
+                   $"{string.Join(",", _fdbColumnsToRetrieve2)} " + // No alias for DOCDATE
+                   $"FROM {_fdbTable1Name} AS t1 " +
+                   $"INNER JOIN {_fdbTable2Name} AS t2 ON t1.{_commonColumn} = t2.{_commonColumn}";
+
+
+
+                using (FbDataAdapter adapter = new FbDataAdapter(joinQuery, connection))
                 {
-                    using (FbDataAdapter adapter = new FbDataAdapter(command))
-                    {
-                        adapter.Fill(dataTable);
-                    }
+                    Console.WriteLine(joinQuery);
+                    adapter.Fill(dataTable);
                 }
             }
 
@@ -60,8 +71,8 @@ namespace DataUpdate
                 connection.Open();
 
                 // Define the unique identifier column name from FDB
-                string uniqueIdentifierColumn = "DTLKEY"; // Replace with your actual column name
-                string qtyColumn = "QTY";
+                string uniqueIdentifierColumn = "DTLKEY1"; // Replace with your actual column name
+                string qtyColumn = "QTY1";
                 string qtyRemainColumn = "qtyremain";
 
                 foreach (DataRow row in data.Rows)
@@ -129,13 +140,16 @@ namespace DataUpdate
             // Replace connection string and table names with your actual values
             string fdbConnectionString = "database=C:\\Users\\User\\Desktop\\Polynic\\ACC-0004.FDB;user=SYSDBA;password=masterkey;DataSource=localhost;Port=3050;Dialect=3;Charset=UTF8;\"";
             string postgresConnectionString = "Host=localhost;Database=postgres;Username=postgres;Password=1234";
-            string fdbTableName = "PH_PIDTL";
+            string fdbTable1Name = "PH_PIDTL";
+            string fdbTable2Name = "PH_PI";
             string postgresTableName = "Label_Data";
+            string commonColumn = "DOCKEY";
 
             // Specify the list of columns to retrieve from the FDB table
-            List<string> fdbColumnsToRetrieve = new List<string>() { "REMARK2", "ITEMCODE", "DESCRIPTION", "DESCRIPTION2", "BATCH", "LOCATION", "QTY", "UOM", "DTLKEY" }; // Replace with your desired columns
+            List<string> fdbColumns1ToRetrieve = new List<string>() { "REMARK2", "ITEMCODE", "DESCRIPTION", "DESCRIPTION2", "BATCH", "LOCATION", "QTY", "UOM", "DTLKEY" }; // Replace with your desired columns
+            List<string> fdbColumns2ToRetrieve = new List<string>() { "DOCDATE"};
 
-            FdbToPostgresUpdater updater = new FdbToPostgresUpdater(fdbConnectionString, postgresConnectionString, fdbTableName, postgresTableName, fdbColumnsToRetrieve);
+            FdbToPostgresUpdater updater = new FdbToPostgresUpdater(fdbConnectionString, postgresConnectionString, fdbTable1Name, fdbTable2Name, commonColumn, postgresTableName, fdbColumns1ToRetrieve, fdbColumns2ToRetrieve);
             updater.UpdateData();
 
             Console.WriteLine("Data update completed.");
